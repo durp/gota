@@ -13,7 +13,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/go-gota/gota/series"
+	"github.com/durp/gota/series"
 )
 
 // DataFrame is a data structure designed for operating on table like data (Such
@@ -1835,6 +1835,7 @@ func findType(arr []string) series.Type {
 	var hasFloats, hasInts, hasBools, hasStrings bool
 	for _, str := range arr {
 		if str == "" || str == "NaN" {
+			hasInts = true
 			continue
 		}
 		if _, err := strconv.Atoi(str); err == nil {
