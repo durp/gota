@@ -26,7 +26,7 @@ func compareFloats(lvalue, rvalue float64, digits int) bool {
 }
 
 func TestDataFrame_New(t *testing.T) {
-	series := []series.Series{
+	s := []series.Series{
 		series.Strings([]int{1, 2, 3, 4, 5}),
 		series.New([]int{1, 2, 3, 4, 5}, series.String, "0"),
 		series.Ints([]int{1, 2, 3, 4, 5}),
@@ -34,7 +34,7 @@ func TestDataFrame_New(t *testing.T) {
 		series.New([]int{1, 2, 3, 4, 5}, series.Float, "1"),
 		series.New([]int{1, 2, 3, 4, 5}, series.Bool, "1"),
 	}
-	d := New(series...)
+	d := New(s...)
 
 	// Check that the names are renamed properly
 	received := d.Names()
@@ -1009,13 +1009,13 @@ func TestLoadMaps(t *testing.T) {
 		{ // Test: 0
 			LoadMaps(
 				[]map[string]interface{}{
-					map[string]interface{}{
+					{
 						"A": "a",
 						"B": 1,
 						"C": true,
 						"D": 0,
 					},
-					map[string]interface{}{
+					{
 						"A": "b",
 						"B": 2,
 						"C": true,
@@ -1033,13 +1033,13 @@ func TestLoadMaps(t *testing.T) {
 		{ // Test: 1
 			LoadMaps(
 				[]map[string]interface{}{
-					map[string]interface{}{
+					{
 						"A": "a",
 						"B": 1,
 						"C": true,
 						"D": 0,
 					},
-					map[string]interface{}{
+					{
 						"A": "b",
 						"B": 2,
 						"C": true,
@@ -1060,13 +1060,13 @@ func TestLoadMaps(t *testing.T) {
 		{ // Test: 2
 			LoadMaps(
 				[]map[string]interface{}{
-					map[string]interface{}{
+					{
 						"A": "a",
 						"B": 1,
 						"C": true,
 						"D": 0,
 					},
-					map[string]interface{}{
+					{
 						"A": "b",
 						"B": 2,
 						"C": true,
@@ -1087,13 +1087,13 @@ func TestLoadMaps(t *testing.T) {
 		{ // Test: 3
 			LoadMaps(
 				[]map[string]interface{}{
-					map[string]interface{}{
+					{
 						"A": "a",
 						"B": 1,
 						"C": true,
 						"D": 0,
 					},
-					map[string]interface{}{
+					{
 						"A": "b",
 						"B": 2,
 						"C": true,
@@ -1118,13 +1118,13 @@ func TestLoadMaps(t *testing.T) {
 		{ // Test: 4
 			LoadMaps(
 				[]map[string]interface{}{
-					map[string]interface{}{
+					{
 						"A": "a",
 						"B": 1,
 						"C": true,
 						"D": 0,
 					},
-					map[string]interface{}{
+					{
 						"A": "b",
 						"B": 2,
 						"C": true,
@@ -1187,11 +1187,13 @@ Spain,2012-02-01,66,555.42,00241
 }
 
 func TestReadJSON(t *testing.T) {
-	table := []struct {
+	tcs := []struct {
+		name    string
 		jsonStr string
 		expDf   DataFrame
 	}{
 		{
+			"null to NaN",
 			`[{"COL.1":null,"COL.2":1,"COL.3":3},{"COL.1":5,"COL.2":2,"COL.3":2},{"COL.1":6,"COL.2":3,"COL.3":1}]`,
 			LoadRecords(
 				[][]string{
@@ -1205,6 +1207,7 @@ func TestReadJSON(t *testing.T) {
 			),
 		},
 		{
+			"no value to NaN",
 			`[{"COL.2":1,"COL.3":3},{"COL.1":5,"COL.2":2,"COL.3":2},{"COL.1":6,"COL.2":3,"COL.3":1}]`,
 			LoadRecords(
 				[][]string{
@@ -1218,24 +1221,26 @@ func TestReadJSON(t *testing.T) {
 			),
 		},
 	}
-	for i, tc := range table {
-		c := ReadJSON(strings.NewReader(tc.jsonStr))
+	for _, tc := range tcs {
+		t.Run(tc.name, func(t *testing.T) {
+			c := ReadJSON(strings.NewReader(tc.jsonStr), DefaultType(series.Int))
 
-		if c.Err != nil {
-			t.Errorf("Test: %d\nError:%v", i, c.Err)
-		}
-		// Check that the types are the same between both DataFrames
-		if !reflect.DeepEqual(tc.expDf.Types(), c.Types()) {
-			t.Errorf("Test: %d\nDifferent types:\nA:%v\nB:%v", i, tc.expDf.Types(), c.Types())
-		}
-		// Check that the colnames are the same between both DataFrames
-		if !reflect.DeepEqual(tc.expDf.Names(), c.Names()) {
-			t.Errorf("Test: %d\nDifferent colnames:\nA:%v\nB:%v", i, tc.expDf.Names(), c.Names())
-		}
-		// Check that the values are the same between both DataFrames
-		if !reflect.DeepEqual(tc.expDf.Records(), c.Records()) {
-			t.Errorf("Test: %d\nDifferent values:\nA:%v\nB:%v", i, tc.expDf.Records(), c.Records())
-		}
+			if c.Err != nil {
+				t.Errorf("Test: %s\nError:%v", tc.name, c.Err)
+			}
+			// Check that the types are the same between both DataFrames
+			if !reflect.DeepEqual(tc.expDf.Types(), c.Types()) {
+				t.Errorf("Test: %s\nDifferent types:\nexpected:%v\nactual:%v", tc.name, tc.expDf.Types(), c.Types())
+			}
+			// Check that the colnames are the same between both DataFrames
+			if !reflect.DeepEqual(tc.expDf.Names(), c.Names()) {
+				t.Errorf("Test: %s\nDifferent colnames:\nexpected:%v\nactual:%v", tc.name, tc.expDf.Names(), c.Names())
+			}
+			// Check that the values are the same between both DataFrames
+			if !reflect.DeepEqual(tc.expDf.Records(), c.Records()) {
+				t.Errorf("Test: %s\nDifferent values:\nexpected:%v\nactual:%v", tc.name, tc.expDf.Records(), c.Records())
+			}
+		})
 	}
 }
 
@@ -1642,17 +1647,17 @@ func TestDataFrame_Maps(t *testing.T) {
 	)
 	m := a.Maps()
 	expected := []map[string]interface{}{
-		map[string]interface{}{
+		{
 			"COL.1": "a",
 			"COL.2": nil,
 			"COL.3": nil,
 		},
-		map[string]interface{}{
+		{
 			"COL.1": "b",
 			"COL.2": 2,
 			"COL.3": nil,
 		},
-		map[string]interface{}{
+		{
 			"COL.1": "c",
 			"COL.2": 3,
 			"COL.3": 3,
@@ -2492,11 +2497,11 @@ func TestDescribe(t *testing.T) {
 		{
 			LoadRecords(
 				[][]string{
-					[]string{"A", "B", "C", "D"},
-					[]string{"a", "4", "5.1", "true"},
-					[]string{"b", "4", "6.0", "true"},
-					[]string{"c", "3", "6.0", "false"},
-					[]string{"a", "2", "7.1", "false"},
+					{"A", "B", "C", "D"},
+					{"a", "4", "5.1", "true"},
+					{"b", "4", "6.0", "true"},
+					{"c", "3", "6.0", "false"},
+					{"a", "2", "7.1", "false"},
 				}),
 
 			New(

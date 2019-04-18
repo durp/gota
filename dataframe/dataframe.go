@@ -23,7 +23,7 @@ import (
 //
 // On the real world, data is very messy and sometimes there are non measurements
 // or missing data. For this reason, DataFrame has support for NaN elements and
-// allows the most common data cleaning and mungling operations such as
+// allows the most common data cleaning and munging operations such as
 // subsetting, filtering, type transformations, etc. In addition to this, this
 // library provides the necessary functions to concatenate DataFrames (By rows or
 // columns), different Join operations (Inner, Outer, Left, Right, Cross) and the
@@ -89,11 +89,11 @@ func checkColumnsDimensions(se ...series.Series) (nrows, ncols int, err error) {
 
 // Copy returns a copy of the DataFrame
 func (df DataFrame) Copy() DataFrame {
-	copy := New(df.columns...)
+	c := New(df.columns...)
 	if df.Err != nil {
-		copy.Err = df.Err
+		c.Err = df.Err
 	}
-	return copy
+	return c
 }
 
 // String implements the Stringer interface for DataFrame
@@ -233,7 +233,7 @@ func (df DataFrame) print(
 			}
 		}
 		if i < len(notShowing) {
-			notShownArr = append(notShownArr, notShowing[i:len(notShowing)])
+			notShownArr = append(notShownArr, notShowing[i:])
 		}
 		for k, ns := range notShownArr {
 			notShown += strings.Join(ns, ", ")
@@ -383,9 +383,9 @@ func (df DataFrame) Rename(newname, oldname string) DataFrame {
 		return DataFrame{Err: fmt.Errorf("rename: can't find column name")}
 	}
 
-	copy := df.Copy()
-	copy.columns[idx].Name = newname
-	return copy
+	cp := df.Copy()
+	cp.columns[idx].Name = newname
+	return cp
 }
 
 // CBind combines the columns of two DataFrames
@@ -701,13 +701,55 @@ type loadOptions struct {
 	names []string
 
 	// Defines which values are going to be considered as NaN when parsing from string.
-	nanValues []string
+	nanValues map[string]struct{}
 
 	// Defines the csv delimiter
 	delimiter rune
 
 	// The types of specific columns can be specified via column name.
 	types map[string]series.Type
+}
+
+func (lo loadOptions) findType(colName string, arr []string) series.Type {
+	if t, ok := lo.types[colName]; ok {
+		return t
+	}
+	if !lo.detectTypes {
+		return lo.defaultType
+	}
+	var hasFloats, hasInts, hasBools, hasStrings bool
+	for _, str := range arr {
+		if _, nan := lo.nanValues[str]; nan {
+			hasInts = true
+			continue
+		}
+		if _, err := strconv.Atoi(str); err == nil {
+			hasInts = true
+			continue
+		}
+		if _, err := strconv.ParseFloat(str, 64); err == nil {
+			hasFloats = true
+			continue
+		}
+		if str == "true" || str == "false" {
+			hasBools = true
+			continue
+		}
+		hasStrings = true
+	}
+	switch {
+	case hasStrings:
+		return series.String
+	case hasBools:
+		return series.Bool
+	case hasFloats:
+		return series.Float
+	case hasInts:
+		return series.Int
+	default: // Panic is gross
+		return lo.defaultType
+	}
+
 }
 
 // DefaultType sets the defaultType option for loadOptions.
@@ -739,7 +781,7 @@ func Names(names ...string) LoadOption {
 }
 
 // NaNValues sets the nanValues option for loadOptions.
-func NaNValues(nanValues []string) LoadOption {
+func NaNValues(nanValues map[string]struct{}) LoadOption {
 	return func(c *loadOptions) {
 		c.nanValues = nanValues
 	}
@@ -801,7 +843,7 @@ func LoadStructs(i interface{}, options ...LoadOption) DataFrame {
 		defaultType: series.String,
 		detectTypes: true,
 		hasHeader:   true,
-		nanValues:   []string{"NA", "NaN", "<nil>"},
+		nanValues:   map[string]struct{}{"NA": {}, "NaN": {}, "<nil>": {}},
 	}
 
 	// Set any custom load options
@@ -876,8 +918,10 @@ func LoadStructs(i interface{}, options ...LoadOption) DataFrame {
 				elements[i] = fieldValue.Interface()
 
 				// Handle `nanValues` option
-				if findInStringSlice(fmt.Sprint(elements[i]), cfg.nanValues) != -1 {
-					elements[i] = nil
+				if eStr, ok := elements[i].(string); ok {
+					if _, nan := cfg.nanValues[eStr]; nan {
+						elements[i] = nil
+					}
 				}
 			}
 
@@ -917,7 +961,7 @@ func LoadRecords(records [][]string, options ...LoadOption) DataFrame {
 		defaultType: series.String,
 		detectTypes: true,
 		hasHeader:   true,
-		nanValues:   []string{"NA", "NaN", "<nil>"},
+		nanValues:   map[string]struct{}{"NA": {}, "NaN": {}, "<nil>": {}},
 	}
 
 	// Set any custom load options
@@ -954,7 +998,11 @@ func LoadRecords(records [][]string, options ...LoadOption) DataFrame {
 		rawcol := make([]string, len(records))
 		for j := 0; j < len(records); j++ {
 			rawcol[j] = records[j][i]
-			if findInStringSlice(rawcol[j], cfg.nanValues) != -1 {
+			t, ok := cfg.types[colname]
+			if !ok {
+				t = cfg.defaultType
+			}
+			if rawcol[j] == "" && numericType(t) {
 				rawcol[j] = "NaN"
 			}
 		}
@@ -962,10 +1010,7 @@ func LoadRecords(records [][]string, options ...LoadOption) DataFrame {
 
 		t, ok := cfg.types[colname]
 		if !ok {
-			t = cfg.defaultType
-			if cfg.detectTypes {
-				t = findType(rawcol)
-			}
+			t = cfg.findType(colname, rawcol)
 		}
 		types[i] = t
 	}
@@ -994,6 +1039,10 @@ func LoadRecords(records [][]string, options ...LoadOption) DataFrame {
 		df.columns[i].Name = colname
 	}
 	return df
+}
+
+func numericType(t series.Type) bool {
+	return t == series.Int || t == series.Float
 }
 
 // LoadMaps creates a new DataFrame based on the given maps. This function assumes
@@ -1377,7 +1426,7 @@ func (df DataFrame) LeftJoin(b DataFrame, keys ...string) DataFrame {
 				newCols[ii].Append(elem)
 				ii++
 			}
-			for _ = range iNotKeysB {
+			for range iNotKeysB {
 				newCols[ii].Append(nil)
 				ii++
 			}
@@ -1481,7 +1530,7 @@ func (df DataFrame) RightJoin(b DataFrame, keys ...string) DataFrame {
 			newCols[ii].Append(elem)
 			ii++
 		}
-		for _ = range iNotKeysA {
+		for range iNotKeysA {
 			newCols[ii].Append(nil)
 			ii++
 		}
@@ -1583,7 +1632,7 @@ func (df DataFrame) OuterJoin(b DataFrame, keys ...string) DataFrame {
 				newCols[ii].Append(elem)
 				ii++
 			}
-			for _ = range iNotKeysB {
+			for range iNotKeysB {
 				newCols[ii].Append(nil)
 				ii++
 			}
@@ -1609,7 +1658,7 @@ func (df DataFrame) OuterJoin(b DataFrame, keys ...string) DataFrame {
 				newCols[ii].Append(elem)
 				ii++
 			}
-			for _ = range iNotKeysA {
+			for range iNotKeysA {
 				newCols[ii].Append(nil)
 				ii++
 			}
@@ -1829,41 +1878,6 @@ func parseSelectIndexes(l int, indexes SelectIndexes, colnames []string) ([]int,
 		return nil, fmt.Errorf("indexing error: unknown indexing mode")
 	}
 	return idx, nil
-}
-
-func findType(arr []string) series.Type {
-	var hasFloats, hasInts, hasBools, hasStrings bool
-	for _, str := range arr {
-		if str == "" || str == "NaN" {
-			hasInts = true
-			continue
-		}
-		if _, err := strconv.Atoi(str); err == nil {
-			hasInts = true
-			continue
-		}
-		if _, err := strconv.ParseFloat(str, 64); err == nil {
-			hasFloats = true
-			continue
-		}
-		if str == "true" || str == "false" {
-			hasBools = true
-			continue
-		}
-		hasStrings = true
-	}
-	switch {
-	case hasStrings:
-		return series.String
-	case hasBools:
-		return series.Bool
-	case hasFloats:
-		return series.Float
-	case hasInts:
-		return series.Int
-	default:
-		panic("couldn't detect type")
-	}
 }
 
 func transposeRecords(x [][]string) [][]string {
